@@ -1,24 +1,24 @@
-# VMware Fusion + Apple Silicon (M2) 에서 Ubuntu 22.04 ARM 부팅 불가 문제 해결
+# Fix: Ubuntu 22.04 ARM Stuck at "EFI stub: Exiting boot services..." on VMware Fusion (Apple Silicon)
 
-> **환경**: MacBook (Apple M2) + VMware Fusion Pro 26H1 + Ubuntu 22.04.5 ARM64 Server  
-> **증상**: 설치 후 부팅 시 `EFI stub: Exiting boot services...` 에서 영구 정지
-
----
-
-## 목차
-
-1. [문제 설명](#1-문제-설명)
-2. [원인 분석](#2-원인-분석)
-3. [실패한 시도들](#3-실패한-시도들)
-4. [최종 해결 방법](#4-최종-해결-방법)
-5. [영구 적용 (HWE 커널 설치)](#5-영구-적용-hwe-커널-설치)
-6. [핵심 요약](#6-핵심-요약)
+> **Environment**: MacBook (Apple M2) + VMware Fusion Pro 26H1 + Ubuntu 22.04.5 ARM64 Server  
+> **Symptom**: After installation, VM hangs permanently at `EFI stub: Exiting boot services...` on every boot
 
 ---
 
-## 1. 문제 설명
+## Table of Contents
 
-Ubuntu 22.04.5 ARM64 Server ISO로 VMware Fusion에서 정상적으로 설치를 완료한 후, 재부팅 시 아래 메시지에서 **무한 정지**하는 현상이 발생한다.
+1. [Problem Description](#1-problem-description)
+2. [Root Cause](#2-root-cause)
+3. [Things That Did NOT Work](#3-things-that-did-not-work)
+4. [The Fix](#4-the-fix)
+5. [Permanent Fix (Install HWE Kernel)](#5-permanent-fix-install-hwe-kernel)
+6. [TL;DR](#6-tldr)
+
+---
+
+## 1. Problem Description
+
+After a successful installation of Ubuntu 22.04.5 ARM64 Server on VMware Fusion, every reboot hangs indefinitely at the following output:
 
 ```
 EFI stub: Booting Linux Kernel...
@@ -27,61 +27,61 @@ EFI stub: Using DTB from configuration table
 EFI stub: Exiting boot services...
 ```
 
-이후 아무런 출력 없이 검은 화면이 유지되며, 아무리 기다려도 부팅이 진행되지 않는다.
+Nothing appears after this. The screen stays black forever regardless of how long you wait.
 
 ---
 
-## 2. 원인 분석
+## 2. Root Cause
 
-Ubuntu 22.04의 기본 커널인 **`5.15.x`** 계열이 VMware Fusion의 Apple Silicon 환경에서 부팅에 실패하는 알려진 버그다.
+The default kernel shipped with Ubuntu 22.04 — **`5.15.x`** — has a known boot failure issue in VMware Fusion on Apple Silicon.
 
-- EFI stub이 부트 서비스를 종료한 후 커널이 초기화를 시작해야 하는데, 이 단계에서 멈춤
-- `EFI_RNG_PROTOCOL unavailable`은 경고일 뿐 원인이 아님
-- Recovery mode도 동일한 커널을 사용하므로 마찬가지로 실패
-- **HWE(Hardware Enablement) 커널 (`5.19+`)** 을 사용하면 정상 부팅됨
+- After the EFI stub exits boot services, the kernel should begin initialization — but it silently freezes
+- `EFI_RNG_PROTOCOL unavailable` is just a warning and is **not** the cause
+- Recovery mode uses the same kernel (5.15), so it fails identically
+- The **HWE (Hardware Enablement) kernel (`5.19+`)** boots successfully
 
 ---
 
-## 3. 실패한 시도들
+## 3. Things That Did NOT Work
 
-아래 방법들을 모두 시도했으나 동일하게 실패했다.
+All of the following were attempted and failed with the same result.
 
-### 3-1. GRUB에서 `acpi=force` 추가
+### 3-1. Adding `acpi=force` in GRUB editor
 
-GRUB 편집 화면(`e` 키)에서 `linux` 줄 끝에 추가:
+Pressed `e` in GRUB menu and appended to the `linux` line:
 ```
 acpi=force
 ```
-→ **실패**: 동일하게 EFI stub에서 정지
+→ **Failed**: Same hang at EFI stub
 
-### 3-2. GRUB에서 `earlycon` + `console` 추가
+### 3-2. Adding `earlycon` + `console` parameters
 
 ```
 acpi=force earlycon=pl011,0x9000000 console=ttyAMA0
 ```
-→ **실패**: 커널 로그조차 출력되지 않고 정지
+→ **Failed**: No kernel output at all, still hangs
 
-### 3-3. `.vmx` 파일에 소프트웨어 MMU 옵션 추가
+### 3-3. Adding software MMU options to `.vmx`
 
 ```
 monitor.virtual_mmu = "software"
 monitor.virtual_exec = "software"
 ```
-→ **실패**: 동일 증상
+→ **Failed**: Same symptom
 
-### 3-4. `.nvram` 파일 삭제 (EFI 설정 초기화)
+### 3-4. Deleting `.nvram` file (EFI settings reset)
 
 ```bash
 rm "Ubuntu 64-bit Arm Server 22.04.5 4.nvram"
 ```
-→ **실패**: 동일 증상
+→ **Failed**: Same symptom
 
-### 3-5. Recovery mode 부팅
+### 3-5. Recovery mode boot
 
-GRUB → Advanced options → recovery mode 선택  
-→ **실패**: 동일한 커널(5.15)을 사용하므로 동일하게 정지
+GRUB → Advanced options → recovery mode  
+→ **Failed**: Uses the same 5.15 kernel, hangs identically
 
-### 3-6. GRUB 쉘에서 `acpi=off`로 수동 부팅
+### 3-6. Manual boot from GRUB shell with `acpi=off`
 
 ```
 grub> set root=(hd0,gpt2)
@@ -89,23 +89,23 @@ grub> linux /vmlinuz-5.15.0-179-generic root=/dev/mapper/ubuntu--vg-ubuntu--lv r
 grub> initrd /initrd.img-5.15.0-179-generic
 grub> boot
 ```
-→ **실패**: 5.15 커널 자체가 문제이므로 파라미터와 무관하게 실패
+→ **Failed**: The issue is the kernel itself, not the boot parameters
 
 ---
 
-## 4. 최종 해결 방법
+## 4. The Fix
 
-### 핵심 아이디어
+### Key Insight
 
-Ubuntu 22.04 설치 ISO의 `/casper/` 디렉토리에는 **HWE 커널** (`hwe-vmlinuz`, `hwe-initrd`)이 포함되어 있다. GRUB 쉘에서 ISO에 있는 HWE 커널로 직접 부팅하면 정상 작동한다.
+The Ubuntu 22.04 installation ISO includes an **HWE kernel** (`hwe-vmlinuz`, `hwe-initrd`) inside its `/casper/` directory. By booting directly from that HWE kernel via the GRUB shell, the system boots successfully.
 
-### 단계별 절차
+### Step-by-Step
 
-#### Step 1. GRUB 쉘 진입
+#### Step 1. Enter GRUB Shell
 
-VM 시작 직후 즉시 VMware 창을 클릭하여 키보드 입력을 잡고, **`c`** 키를 눌러 GRUB 커맨드라인(쉘)으로 진입한다.
+As soon as the VM starts, click inside the VMware window to capture keyboard input and press **`c`** to enter the GRUB command line.
 
-> **팁**: GRUB 메뉴가 안 보이면 VM 시작 직후 **ESC** 키를 연타하여 Boot Manager → ubuntu → GRUB 메뉴 순서로 접근한다.
+> **Tip**: If the GRUB menu doesn't appear, spam **ESC** right after the VM starts to get to the Boot Manager, then navigate: Boot Manager → ubuntu → GRUB menu → press `c`
 
 ```
 GNU GRUB  version 2.06
@@ -113,32 +113,32 @@ GNU GRUB  version 2.06
 grub> _
 ```
 
-#### Step 2. 디바이스 목록 확인
+#### Step 2. List Available Devices
 
 ```
 grub> ls
 ```
 
-출력 예시:
+Example output:
 ```
 (proc) (memdisk) (hd0) (hd0,gpt3) (hd0,gpt2) (hd0,gpt1) (cd0) (cd0,msdos2) (cd0,msdos1) (lvm/ubuntu--vg-ubuntu--lv)
 ```
 
-`(cd0)` 가 Ubuntu ISO가 마운트된 CDROM 드라이브다.
+`(cd0)` is the CDROM drive where the Ubuntu ISO is mounted.
 
-#### Step 3. ISO의 casper 디렉토리 확인
+#### Step 3. Verify HWE Kernel Exists in ISO
 
 ```
 grub> ls (cd0)/casper/
 ```
 
-출력에서 `hwe-vmlinuz` 와 `hwe-initrd` 가 있는지 확인한다.
+Confirm that `hwe-vmlinuz` and `hwe-initrd` are present in the output:
 
 ```
 hwe-initrd  hwe-vmlinuz  initrd  vmlinuz  ...
 ```
 
-#### Step 4. HWE 커널로 부팅
+#### Step 4. Boot Using the HWE Kernel from ISO
 
 ```
 grub> linux (cd0)/casper/hwe-vmlinuz
@@ -146,43 +146,43 @@ grub> initrd (cd0)/casper/hwe-initrd
 grub> boot
 ```
 
-정상적으로 Ubuntu 설치 환경으로 부팅된다.
+The system will boot successfully into the Ubuntu environment.
 
 ---
 
-## 5. 영구 적용 (HWE 커널 설치)
+## 5. Permanent Fix (Install HWE Kernel)
 
-ISO로 부팅한 후 설치 환경 쉘에 접근하거나, 설치된 시스템에 chroot로 진입하여 HWE 커널을 설치한다.
+Once booted, install the HWE kernel so the VM boots normally without needing the ISO.
 
-### 방법 A: ISO 부팅 후 chroot로 진입하여 설치
+### Option A: chroot from ISO environment
 
 ```bash
-# LVM 볼륨 활성화
+# Activate LVM volume
 vgchange -ay
 
-# 루트 파티션 마운트
+# Mount root partition
 mount /dev/mapper/ubuntu--vg-ubuntu--lv /mnt
 
-# 필수 디렉토리 바인드 마운트
+# Bind mount essential directories
 mount --bind /dev /mnt/dev
 mount --bind /proc /mnt/proc
 mount --bind /sys /mnt/sys
 
-# chroot 진입
+# Enter chroot
 chroot /mnt
 
-# HWE 커널 설치
+# Install HWE kernel
 apt update
 apt install linux-generic-hwe-22.04 -y
 
-# 완료 후 재부팅
+# Reboot
 exit
 reboot
 ```
 
-### 방법 B: 정상 부팅 후 바로 설치 (방법 A로 부팅에 성공한 경우)
+### Option B: Install directly after booting (if you got in via Option A above)
 
-로그인 후 바로 실행:
+After logging in:
 
 ```bash
 sudo apt update
@@ -190,28 +190,28 @@ sudo apt install linux-generic-hwe-22.04 -y
 sudo reboot
 ```
 
-재부팅 후 ISO 없이 정상 부팅되는지 확인한다.
+After rebooting, the VM should boot normally without the ISO attached.
 
 ---
 
-## 6. 핵심 요약
+## 6. TL;DR
 
-| 항목 | 내용 |
-|------|------|
-| **문제 커널** | `linux-generic` (5.15.x) |
-| **정상 커널** | `linux-generic-hwe-22.04` (5.19+) |
-| **해결 핵심** | ISO 내장 HWE 커널(`hwe-vmlinuz`)로 GRUB 쉘에서 직접 부팅 |
-| **영구 해결** | `apt install linux-generic-hwe-22.04` |
-| **영향 환경** | VMware Fusion + Apple Silicon (M1/M2) + Ubuntu 22.04 |
-
----
-
-## 참고
-
-- 이 문제는 VMware Fusion 13.x ~ 26H1 전 버전에서 동일하게 발생한다.
-- Ubuntu 22.04.2 LTS 이상에서 HWE 커널을 사용하면 VMware Fusion ARM 환경에서 정상 동작한다.
-- Ubuntu 24.04 LTS는 기본 커널(6.x)부터 이 문제가 없으므로, 새로 설치할 경우 24.04를 권장한다.
+| Item | Detail |
+|------|--------|
+| **Broken kernel** | `linux-generic` (5.15.x) |
+| **Working kernel** | `linux-generic-hwe-22.04` (5.19+) |
+| **Quick fix** | Boot from ISO's HWE kernel via GRUB shell: `linux (cd0)/casper/hwe-vmlinuz` |
+| **Permanent fix** | `sudo apt install linux-generic-hwe-22.04` |
+| **Affected environments** | VMware Fusion + Apple Silicon (M1/M2/M3) + Ubuntu 22.04 |
 
 ---
 
-*이 문서는 실제 트러블슈팅 경험을 바탕으로 작성되었습니다.*
+## Notes
+
+- This issue affects VMware Fusion 13.x through 26H1.
+- Ubuntu 22.04.2 LTS and later work correctly on VMware Fusion ARM when using the HWE kernel.
+- If you're doing a fresh install, consider **Ubuntu 24.04 LTS** instead — its default kernel (6.x) has no such issue.
+
+---
+
+*This document is based on firsthand troubleshooting experience.*
