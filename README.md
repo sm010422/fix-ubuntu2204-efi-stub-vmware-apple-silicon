@@ -1,0 +1,1 @@
+# fix-ubuntu2204-efi-stub-vmware-apple-silicon
